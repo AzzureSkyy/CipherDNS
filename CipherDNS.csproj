@@ -8,6 +8,7 @@
 	<Nullable>enable</Nullable>
 	<AssemblyName>CipherDNS</AssemblyName>
 	<ApplicationManifest>app.manifest</ApplicationManifest>
+	<ApplicationIcon>CipherDNS.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

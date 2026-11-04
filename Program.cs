@@ -3,7 +3,7 @@ namespace CipherDNS;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         using var single = new Mutex(true, "CipherDNS.SingleInstance", out var first);
         if (!first)
@@ -12,6 +12,6 @@ static class Program
             return;
         }
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        Application.Run(new MainForm(args.Contains("--tray")));
     }
 }

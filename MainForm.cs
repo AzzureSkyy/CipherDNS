@@ -28,10 +28,17 @@ public sealed class MainForm : Form
     };
     readonly NotifyIcon tray = new() { Text = "CipherDNS", Visible = true };
     readonly Icon iconOn = AppIcon.Create(true), iconOff = AppIcon.Create(false);
+    readonly CheckBox runAtStartup = new()
+    {
+        Text = "Run at Windows startup", AutoSize = true,
+        ForeColor = Theme.Text, Font = new Font("Segoe UI", 9.5f), Margin = new Padding(12, 6, 0, 0),
+    };
+    readonly bool startHidden;
     bool quitting;
 
-    public MainForm()
+    public MainForm(bool startHidden = false)
     {
+        this.startHidden = startHidden;
         Text = "CipherDNS";
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
@@ -60,7 +67,15 @@ public sealed class MainForm : Form
         list.Resize += (_, _) => FitLastColumn();
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, Margin = new Padding(0, 12, 0, 12) };
-        buttons.Controls.AddRange([connect, disconnect, test, blockIpv6]);
+        buttons.Controls.AddRange([connect, disconnect, test, blockIpv6, runAtStartup]);
+                runAtStartup.Checked = Startup.IsEnabled();
+                runAtStartup.CheckedChanged += (_, _) =>
+                {
+                    if (Startup.Set(runAtStartup.Checked))
+                        Append(runAtStartup.Checked ? "Will start at Windows logon and auto-connect to the fastest server." : "Removed from Windows startup.");
+                    else
+                        Append("Could not change the startup setting.");
+                };
         connect.Click += (_, _) => Connect();
         disconnect.Click += (_, _) => Disconnect();
         test.Click += async (_, _) => Append(await Engine.TestAsync());
@@ -107,10 +122,37 @@ public sealed class MainForm : Form
             Theme.DarkScrollbars(log);
         }
 
+        protected override void SetVisibleCore(bool value)
+        {
+            if (startHidden && !IsHandleCreated)
+            {
+                CreateHandle();
+                value = false;
+                AutoReconnect();
+            }
+            base.SetVisibleCore(value);
+        }
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
             FitLastColumn();
+            if (!startHidden) AutoReconnect();
+        }
+
+        bool reconnectTried;
+
+        void AutoReconnect()
+        {
+            if (reconnectTried || engine.Running) return;
+            reconnectTried = true;
+            // At logon always pick the engine's fastest no-log DNSSEC server.
+            var name = startHidden ? Providers.All.First(p => p.Category == "Auto").Name : Startup.LastProvider;
+            var item = list.Items.Cast<ListViewItem>().FirstOrDefault(i => ((Provider)i.Tag!).Name == name);
+            if (item is null) return;
+            list.SelectedItems.Clear();
+            item.Selected = true;
+            Connect();
         }
 
         static Panel Framed(Control inner)
@@ -163,7 +205,8 @@ public sealed class MainForm : Form
             {
                 Append($"Starting DNSCrypt with {provider.Name}...");
                 engine.Start(provider, blockIpv6.Checked);
-                tray.ShowBalloonTip(2000, "CipherDNS", $"Encrypted DNS via {provider.Name}", ToolTipIcon.Info);
+                Startup.SaveLastProvider(provider.Name);
+                Toast.Show("CipherDNS protected", $"Encrypted DNS via {provider.Name}", true);
             }
             catch (Exception e)
             {
@@ -176,6 +219,7 @@ public sealed class MainForm : Form
         void Disconnect()
         {
             engine.Stop();
+            Startup.SaveLastProvider(null);
             Append("Disconnected; Windows DNS restored.");
             UpdateStatus();
         }
@@ -208,7 +252,7 @@ public sealed class MainForm : Form
             {
                 e.Cancel = true;
                 Hide();
-                tray.ShowBalloonTip(1500, "CipherDNS", "Still running in the tray.", ToolTipIcon.None);
+                Toast.Show("CipherDNS", "Still running in the tray.", engine.Running);
                 return;
             }
             engine.Dispose();
